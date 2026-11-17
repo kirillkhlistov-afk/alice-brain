@@ -1,0 +1,15 @@
+[Unit]
+Description=Alice Brain — свой голосовой помощник
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m brain.main --config /etc/alice-brain/config.json run
+WorkingDirectory=/opt/alice-brain
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

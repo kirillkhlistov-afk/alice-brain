@@ -1,0 +1,24 @@
+{
+  "name": "Алиса",
+  "city": "Москва",
+  "command_timeout": 7,
+  "llm": {
+    "api_base": "https://api.openai.com/v1",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "system_prompt": "Ты — голосовой помощник Алиса, встроенный в домашнюю колонку. Отвечай по-русски, коротко и по делу, 1-2 предложения, без смайликов."
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "speech": {
+    "wake_words": ["алиса", "начала", "слушай"],
+    "vosk_model_path": "/opt/alice-brain/models/vosk-model-small-ru-0.22",
+    "tts_engine": "espeak",
+    "tts_voice": "ru",
+    "sample_rate": 16000,
+    "input_device": "default",
+    "output_device": "default"
+  }
+}
