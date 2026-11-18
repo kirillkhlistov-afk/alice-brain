@@ -183,10 +183,30 @@ def push_via_adb(host: str) -> bool:
         log(f"На {host} нет открытого порта {ADB_PORT} (ADB по сети).")
         log("Root ADB сначала нужно включить на колонке — https://hackalice.me/start/root/")
         return False
-    run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"])
+    run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"], capture_output=True, text=True)
+    devices = run([ADB_BIN, "devices"], capture_output=True, text=True)
+    state = ""
+    for line in devices.stdout.splitlines():
+        if line.startswith(f"{host}:{ADB_PORT}"):
+            state = line.split()[-1]
+            break
+    if state == "unauthorized":
+        log("Колонка подключена, но не авторизовала этот ПК (unauthorized)")
+        log("Это значит, что на ней стоковая прошивка без root-ADB.")
+        log("Нужен root (одноразовый шаг): https://hackalice.me/start/root/")
+        return False
+    if state == "offline":
+        log("Колонка offline — переподключаю...")
+        run([ADB_BIN, "disconnect", f"{host}:{ADB_PORT}"], capture_output=True)
+        run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"])
     probe = run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", "echo", "ok"], capture_output=True, text=True)
     if probe.stdout.strip() != "ok":
-        log("ADB не отвечает: доступ не root или порт закрыт")
+        log("ADB не отвечает на команды")
+        if probe.stderr.strip():
+            log(f"причина: {probe.stderr.strip()}")
+        if probe.stdout.strip():
+            log(f"ответ: {probe.stdout.strip()}")
+        log("Скорее всего root-доступ на колонке ещё не включён — https://hackalice.me/start/root/")
         return False
     log(f"Копирую проект в {DEVICE_DIR} ...")
     if run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", f"mkdir -p {DEVICE_DIR}"]).returncode != 0:
