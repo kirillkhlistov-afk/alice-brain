@@ -477,7 +477,7 @@ def hotspot_cleanup() -> None:
     run_hotspot_ps(cleanup=True)
 
 
-def hotspot_install() -> int:
+def hotspot_install(unlock_only: bool = False) -> int:
     import time
     if sys.platform != "win32":
         log("ноут-хотспот автоматом только на Windows. На Linux/macOS — https://github.com/krevetkqqq/lite-kit (start.sh)")
@@ -501,10 +501,12 @@ def hotspot_install() -> int:
         hotspot_diagnostics()
         guide_hotspot()
         return 1
-    if not push_via_adb(host):
-        return 1
-    if wait_panel(host):
-        print("\nГотово! Скажи в микрофон: «Алиса» → «включи музыку»")
+    harden(host)
+    if not unlock_only:
+        if not push_via_adb(host):
+            return 1
+        if wait_panel(host):
+            print("\nГотово! Скажи в микрофон: «Алиса» → «включи музыку»")
     print("\nПОСЛЕДНИЙ ШАГ: верни колонку в домашнюю Wi-Fi сеть:")
     print("  приложение «Дом с Алисой» → устройство → настройки → Wi-Fi → домашняя сеть.")
     try:
@@ -513,6 +515,10 @@ def hotspot_install() -> int:
         pass
     hotspot_cleanup()
     time.sleep(5)
+    if unlock_only:
+        print("\nКОЛОНКА РАЗБЛОКИРОВАНА. root закреплён, обновления отключены.")
+        print("Когда захочешь ставить мозг — просто запусти tools\\install_hotspot_windows.bat,")
+        print("или в домашней сети: python alice_install.py (я сам найду колонку)")
     return 0
 
 
@@ -599,10 +605,12 @@ def main() -> int:
     parser.add_argument("--user", default="root", help="пользователь SSH (по умолчанию root)")
     parser.add_argument("--hotspot", action="store_true",
                         help="ноут раздаёт Wi-Fi вместо роутера (Windows, режим разблокировки)")
+    parser.add_argument("--unlock-only", action="store_true",
+                        help="с --hotspot: только разблокировать колонку, мозг не ставить")
     args = parser.parse_args()
 
     if args.hotspot:
-        return hotspot_install()
+        return hotspot_install(unlock_only=args.unlock_only)
 
     host = args.host or find_speaker()
     if not host:
