@@ -427,10 +427,10 @@ def find_hotspot_speaker() -> str | None:
     return adb_hosts[0] if adb_hosts else None
 
 
-def wait_root_hotspot(attempts: int = 40, delay: float = 12) -> str | None:
+def wait_root_hotspot(attempts: int = 90, delay: float = 12) -> str | None:
     import time
     for attempt in range(attempts):
-        log(f"ищу колонку с root в сети хотспота ({attempt + 1}/{attempts})...")
+        log(f"ищу колонку с root в сети хотспота ({attempt + 1}/{attempts}) — жду, без спешки...")
         host = find_hotspot_speaker()
         if host:
             run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"], capture_output=True, text=True)
@@ -515,6 +515,15 @@ def hotspot_install(unlock_only: bool = False) -> int:
     start_stand()
     guide_hotspot()
     host = wait_root_hotspot()
+    while not host:
+        try:
+            answer = input("Ещё раз сбрось колонку и привяжи в приложении (порядок в гайде выше) —"
+                           " и нажми Enter, продолжу ждать. Ctrl+C — стоп. ")
+        except (EOFError, KeyboardInterrupt):
+            break
+        if answer.strip().lower() in ("q", "quit", "нет", "n"):
+            break
+        host = wait_root_hotspot()
     if not host:
         hotspot_diagnostics()
         guide_hotspot()
