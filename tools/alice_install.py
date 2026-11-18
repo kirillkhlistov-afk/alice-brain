@@ -31,6 +31,30 @@ PLATFORM_TOOLS = {
     "darwin": "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip",
 }
 ADB_BIN = "adb"
+ROOT_DNS = "179.254.167.126"
+ROOT_GUIDE = [
+    "ROOT-ПОМОЩНИК: DNS-метод для Станции Лайт (YNDX-00025), один раз, ~15 минут.",
+    "",
+    "1. СБРОС: выключи кабель питания, подожди пару секунд, вставь обратно.",
+    "   СРАЗУ после включения подсветки зажми кнопку ПАУЗЫ и держи 6-10 сек,",
+    "   пока подсветка не станет жёлто-зелёной. Отпусти: колонка ждёт настройки.",
+    "",
+    "2. ПРИЛОЖЕНИЕ: открой «Дом с Алисой» (Bluetooth и геолокация на телефоне — вкл):",
+    "   «+» → «Устройство с Алисой» → Лайт → дойди ДО ЭКРАНА ВЫБОРА Wi-Fi.",
+    "   ВАЖНО: не жми «Подключиться», пока не сделаешь шаг 3!",
+    "   Лайфхак: выключи на телефоне Wi-Fi (оставь мобильный интернет + Bluetooth),",
+    "   пароль Wi-Fi потом введёшь вручную — так надёжнее.",
+    "",
+    "3. РОУТЕР: включи DNS " + ROOT_DNS + " (DNS 2 — очисти):",
+    "   Keenetic: Сетевые правила → Домашняя сеть → Параметры IP и DHCP → DNS 1",
+    "   TP-Link: Дополнительно → Сеть → DHCP-сервер → Предпочитаемый DNS-сервер",
+    "   Другой: ищи «DNS» / «DHCP» в настройках, впиши тот же адрес.",
+    "",
+    "4. В приложении теперь жми «Подключиться» и жди. Колонка сходит на сервер",
+    "   разблокировки и включит ADB. Я сам поймаю момент и продолжу установку.",
+    "",
+    "После установки верни на роутере прежний DNS.",
+]
 
 
 def log(text: str) -> None:
@@ -176,6 +200,29 @@ def run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, **kwargs)
 
 
+def guide_root() -> None:
+    print("\n" + "=" * 56)
+    for line in ROOT_GUIDE:
+        print(line)
+    print("=" * 56 + "\n")
+
+
+def wait_root(host: str, attempts: int = 20, delay: float = 15) -> bool:
+    import time
+    for attempt in range(attempts):
+        log(f"жду root на колонке (попытка {attempt + 1}/{attempts}, следующая через {int(delay)} сек)...")
+        time.sleep(delay)
+        run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"], capture_output=True, text=True)
+        probe = subprocess.run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", "id"],
+                               capture_output=True, text=True)
+        out = (probe.stdout or "") + (probe.stderr or "")
+        if "uid=0" in out:
+            log("ROOT ПОЛУЧЕН! Колонка разблокирована.")
+            return True
+    log("root так и не появился — проверь шаги выше (особенно DNS на роутере)")
+    return False
+
+
 def push_via_adb(host: str) -> bool:
     if not ensure_adb():
         return False
@@ -192,9 +239,9 @@ def push_via_adb(host: str) -> bool:
             break
     if state == "unauthorized":
         log("Колонка подключена, но не авторизовала этот ПК (unauthorized)")
-        log("Это значит, что на ней стоковая прошивка без root-ADB.")
-        log("Нужен root (одноразовый шаг): https://hackalice.me/start/root/")
-        return False
+        guide_root()
+        if not wait_root(host):
+            return False
     if state == "offline":
         log("Колонка offline — переподключаю...")
         run([ADB_BIN, "disconnect", f"{host}:{ADB_PORT}"], capture_output=True)
@@ -206,8 +253,9 @@ def push_via_adb(host: str) -> bool:
             log(f"причина: {probe.stderr.strip()}")
         if probe.stdout.strip():
             log(f"ответ: {probe.stdout.strip()}")
-        log("Скорее всего root-доступ на колонке ещё не включён — https://hackalice.me/start/root/")
-        return False
+        guide_root()
+        if not wait_root(host):
+            return False
     log(f"Копирую проект в {DEVICE_DIR} ...")
     if run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", f"mkdir -p {DEVICE_DIR}"]).returncode != 0:
         log("mkdir вернул ошибку (нет прав?)")
