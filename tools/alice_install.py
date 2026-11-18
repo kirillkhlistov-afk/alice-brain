@@ -69,6 +69,11 @@ ROOT_GUIDE = [
     "  СНИЗУ роутера. Открой в браузере " + ROUTER_HINT +
     ", логин admin (или с наклейки).",
     "",
+    "  Нет и второго телефона? На Windows есть вариант НОУТ-ХОТСПТ:",
+    "  python alice_install.py --hotspot",
+    "  (или двойной клик по install_hotspot_windows.bat в папке tools/).",
+    "  Ноут сам раздаст Wi-Fi, сам поднимет сервер разблокировки и включит ADB.",
+    "",
     "  Если доступа всё равно нет — раздача с Android (по инструкции hackalice):",
     "  1) возьми ВТОРОЙ телефон и включи на нём точку доступа Wi-Fi;",
     "  2) на нём же поставь из Play Market приложение «DNS Changer»",
@@ -83,6 +88,39 @@ ROOT_GUIDE = [
     "ли ADB, и как только root появится — закончу установку без тебя.",
     "",
     "ПОСЛЕ установки: верни на роутере DNS, какой был (иначе интернет не заработает).",
+]
+
+
+KIT_DIR = os.path.join(os.path.expanduser("~"), ".alice-tools", "lite-kit")
+LITEKIT_ZIP = "https://github.com/krevetkqqq/lite-kit/archive/refs/heads/main.zip"
+HOTSPOT_SSID = "alice-setup"
+HOTSPOT_PASS = "alice12345"
+HOTSPOT_NET = "192.168.137.0/24"
+HOTSPOT_PS1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alice_hotspot.ps1")
+HOTSPOT_HOSTS_MARK = "ALICE-BRAIN BEGIN"
+HOTSPOT_GUIDE = [
+    "НОУТ ВМЕСТО РОУТЕРА: ноут сам раздаёт Wi-Fi и сам включает ADB на колонке.",
+    f"Сеть хотспота: {HOTSPOT_SSID} (пароль: {HOTSPOT_PASS})",
+    "Сервер разблокировки уже работает в отдельном чёрном окне — НЕ закрывай его!",
+    "",
+    "ШАГ 1. КОЛОНКА — СБРОС (руки на колонке):",
+    "  а) вытащи кабель питания из колонки, подожди пару секунд;",
+    "  б) вставь кабель обратно;",
+    "  в) СРАЗУ, как только кольцо начнёт светиться, зажми кнопку ПАУЗЫ;",
+    "  г) держи 6-10 секунд, пока кольцо не станет ЖЁЛТО-ЗЕЛЁНЫМ;",
+    "  д) отпусти. Кольцо пульсирует голубым — колонка ждёт настройки.",
+    "  (Если зажать кнопку ДО включения питания — сброс не сработает.)",
+    "",
+    "ШАГ 2. ТЕЛЕФОН (приложение «Дом с Алисой»):",
+    "  а) выключи Wi-Fi на телефоне (мобильный интернет пусть работает);",
+    "  б) включи Bluetooth и геолокацию;",
+    "  в) в приложении: «+» → «Устройство с Алисой» → Станция Лайт;",
+    f"  г) дойди до экрана выбора Wi-Fi, выбери сеть {HOTSPOT_SSID}, пароль {HOTSPOT_PASS};",
+    "  д) жми «Подключиться». Телефон напишет, что в сети нет интернета, —",
+    "     НЕ отменяй, просто подожди 1-2 минуты.",
+    "",
+    "Дальше всё само: я найду колонку в сети хотспота, получу root и поставлю",
+    "alice-brain без тебя.",
 ]
 
 
@@ -288,6 +326,153 @@ def harden(host: str) -> None:
     log("колонка вернулась в строй")
 
 
+def hosts_has_marker() -> bool:
+    path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                        "System32", "drivers", "etc", "hosts")
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            return HOTSPOT_HOSTS_MARK in f.read()
+    except OSError:
+        return False
+
+
+def ensure_litekit() -> bool:
+    server = os.path.join(KIT_DIR, "scripts", "equasar_server.py")
+    cert = os.path.join(KIT_DIR, "certs", "fullchain.pem")
+    if os.path.isfile(server) and os.path.isfile(cert):
+        return True
+    root = os.path.dirname(KIT_DIR)
+    os.makedirs(root, exist_ok=True)
+    zpath = os.path.join(root, "lite-kit.zip")
+    log("скачиваю lite-kit (сервер разблокировки + сертификаты, ~1 МБ, один раз)...")
+    try:
+        urllib.request.urlretrieve(LITEKIT_ZIP, zpath)
+        with zipfile.ZipFile(zpath) as zf:
+            zf.extractall(root)
+        os.remove(zpath)
+    except Exception as exc:
+        log(f"не смог скачать lite-kit: {exc}")
+        log("проверь интернет на ноуте и запусти ещё раз")
+        return False
+    src = os.path.join(root, "lite-kit-main")
+    if not os.path.isdir(src):
+        log("в архиве lite-kit неожиданная структура")
+        return False
+    if os.path.isdir(KIT_DIR):
+        shutil.rmtree(KIT_DIR)
+    shutil.move(src, KIT_DIR)
+    ok = os.path.isfile(server) and os.path.isfile(cert)
+    if ok:
+        log("lite-kit готов")
+    return ok
+
+
+def run_hotspot_ps(cleanup: bool = False) -> None:
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", HOTSPOT_PS1]
+    if cleanup:
+        cmd.append("-Cleanup")
+    if sys.platform == "win32":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(cmd, creationflags=flags)
+
+
+def wait_hotspot_ready(attempts: int = 90) -> bool:
+    import time
+    log("поднял точку доступа? Нажми ДА в окне Windows, если попросит права админа!")
+    for _ in range(attempts):
+        if hosts_has_marker():
+            time.sleep(3)
+            return True
+        time.sleep(2)
+    return False
+
+
+def start_stand() -> None:
+    import time
+    log("запускаю сервер разблокировки (новое чёрное окно — НЕ закрывай его)...")
+    flags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+    subprocess.Popen([sys.executable, os.path.join(KIT_DIR, "scripts", "equasar_server.py"), "--dns"],
+                     cwd=KIT_DIR, creationflags=flags)
+    time.sleep(3)
+
+
+def guide_hotspot() -> None:
+    print("\n" + "=" * 56)
+    for line in HOTSPOT_GUIDE:
+        print(line)
+    print("=" * 56 + "\n")
+
+
+def find_hotspot_speaker() -> str | None:
+    adb_hosts = [ip for ip, port in scan_network(ipaddress.ip_network(HOTSPOT_NET), (ADB_PORT,))
+                 if port == ADB_PORT]
+    return adb_hosts[0] if adb_hosts else None
+
+
+def wait_root_hotspot(attempts: int = 30, delay: float = 12) -> str | None:
+    import time
+    for attempt in range(attempts):
+        log(f"ищу колонку с root в сети хотспота ({attempt + 1}/{attempts})...")
+        host = find_hotspot_speaker()
+        if host:
+            run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"], capture_output=True, text=True)
+            probe = subprocess.run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", "id"],
+                                   capture_output=True, text=True)
+            out = (probe.stdout or "") + (probe.stderr or "")
+            if "uid=0" in out:
+                log(f"ROOT ПОЛУЧЕН! Колонка: {host}")
+                return host
+        time.sleep(delay)
+    return None
+
+
+def hotspot_cleanup() -> None:
+    log("выключаю точку доступа на ноуте и убираю подмену DNS (нажми ДА в окне UAC)...")
+    run_hotspot_ps(cleanup=True)
+
+
+def hotspot_install() -> int:
+    import time
+    if sys.platform != "win32":
+        log("ноут-хотспот автоматом только на Windows. На Linux/macOS — https://github.com/krevetkqqq/lite-kit (start.sh)")
+        return 1
+    if not os.path.isfile(HOTSPOT_PS1):
+        log(f"не нашёл {HOTSPOT_PS1} — запусти установщик из папки tools/ проекта")
+        return 1
+    if not ensure_litekit():
+        return 1
+    log("ШАГ A. Поднимаю на ноуте точку доступа и подмену DNS...")
+    run_hotspot_ps()
+    if not wait_hotspot_ready():
+        log("хотспот не поднялся: похоже, окно UAC было закрыто (нужны права админа)")
+        log("запусти ещё раз и нажми ДА, или включи «Мобильный хот-спот» в настройках Windows руками")
+        return 1
+    log(f"точка доступа работает: {HOTSPOT_SSID} (пароль {HOTSPOT_PASS})")
+    start_stand()
+    guide_hotspot()
+    host = wait_root_hotspot()
+    if not host:
+        log("root так и не появился. Проверь:")
+        log("  1) чёрное окно сервера на ноуте ещё открыто?")
+        log("  2) телефон при привязке был с ВЫКЛЮЧЕННЫМ Wi-Fi?")
+        log("  3) сброс колонки: жать ПАУЗУ СРАЗУ после втыкания кабеля, 6-10 сек, до ЖЁЛТО-ЗЕЛЁНОГО")
+        guide_hotspot()
+        return 1
+    if not push_via_adb(host):
+        return 1
+    if wait_panel(host):
+        print("\nГотово! Скажи в микрофон: «Алиса» → «включи музыку»")
+    print("\nПОСЛЕДНИЙ ШАГ: верни колонку в домашнюю Wi-Fi сеть:")
+    print("  приложение «Дом с Алисой» → устройство → настройки → Wi-Fi → домашняя сеть.")
+    try:
+        input("Когда сделаешь — нажми Enter здесь, я выключу хотспот и почищу DNS... ")
+    except (EOFError, KeyboardInterrupt):
+        pass
+    hotspot_cleanup()
+    time.sleep(5)
+    return 0
+
+
 def push_via_adb(host: str) -> bool:
     if not ensure_adb():
         return False
@@ -369,7 +554,12 @@ def main() -> int:
     parser.add_argument("--host", help="IP колонки (если не указан — авто-поиск по сети)")
     parser.add_argument("--method", choices=("adb", "ssh"), default="adb")
     parser.add_argument("--user", default="root", help="пользователь SSH (по умолчанию root)")
+    parser.add_argument("--hotspot", action="store_true",
+                        help="ноут раздаёт Wi-Fi вместо роутера (Windows, режим разблокировки)")
     args = parser.parse_args()
+
+    if args.hotspot:
+        return hotspot_install()
 
     host = args.host or find_speaker()
     if not host:
