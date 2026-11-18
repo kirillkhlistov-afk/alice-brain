@@ -88,41 +88,79 @@ def find_speaker() -> str | None:
     return None
 
 
+def _kill_adb() -> None:
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/IM", "adb.exe"],
+                       capture_output=True)
+    else:
+        subprocess.run(["pkill", "-f", "adb"], capture_output=True)
+
+
+def _find_cached_adb() -> str | None:
+    root = os.path.join(os.path.expanduser("~"), ".alice-tools")
+    exe = ".exe" if sys.platform == "win32" else ""
+    if not os.path.isdir(root):
+        return None
+    for name in sorted(os.listdir(root), reverse=True):
+        p = os.path.join(root, name, "adb" + exe)
+        if os.path.isfile(p):
+            return p
+    p = os.path.join(root, "adb" + exe)
+    return p if os.path.isfile(p) else None
+
+
 def ensure_adb() -> bool:
     global ADB_BIN
     if shutil.which("adb"):
         ADB_BIN = shutil.which("adb")
         return True
-    base = os.path.join(os.path.expanduser("~"), ".alice-tools", "adb")
-    for p in (base, base + ".exe"):
-        if os.path.isfile(p):
-            ADB_BIN = p
-            return True
+    cached = _find_cached_adb()
+    if cached:
+        ADB_BIN = cached
+        return True
     url = PLATFORM_TOOLS.get(sys.platform)
     if not url:
         log("adb не найден в PATH — поставь platform-tools: https://developer.android.com/tools/releases/platform-tools")
         return False
-    dest = os.path.join(os.path.expanduser("~"), ".alice-tools")
-    os.makedirs(dest, exist_ok=True)
-    zpath = os.path.join(dest, "platform-tools.zip")
+    root = os.path.join(os.path.expanduser("~"), ".alice-tools")
+    os.makedirs(root, exist_ok=True)
+    zpath = os.path.join(root, "platform-tools.zip")
     log("adb не найден в PATH — скачиваю Android platform-tools (~10 МБ, один раз)...")
     try:
-        urllib.request.urlretrieve(url, zpath)
-        with zipfile.ZipFile(zpath) as zf:
-            zf.extractall(dest)
+        try:
+            urllib.request.urlretrieve(url, zpath)
+        except PermissionError:
+            _kill_adb()
+            urllib.request.urlretrieve(url, zpath)
+        extracted = False
+        for attempt in range(3):
+            target = os.path.join(root, f"platform-tools-{attempt}" if attempt else "platform-tools")
+            try:
+                with zipfile.ZipFile(zpath) as zf:
+                    zf.extractall(target)
+                extracted = True
+                break
+            except PermissionError:
+                log("файл adb занят (висит старый adb) — перезапускаю...")
+                _kill_adb()
         os.remove(zpath)
+        if not extracted:
+            log("не смог распаковать platform-tools — файл adb заблокирован")
+            log("закрой другие окна установщика или перезагрузи ПК и запусти ещё раз")
+            return False
     except Exception as exc:
         log(f"не смог скачать platform-tools: {exc}")
         log("поставь вручную: https://developer.android.com/tools/releases/platform-tools")
         return False
-    ADB_BIN = os.path.join(dest, "platform-tools", "adb" + (".exe" if sys.platform == "win32" else ""))
+    exe = ".exe" if sys.platform == "win32" else ""
+    ADB_BIN = os.path.join(target, "adb" + exe)
     if not os.path.isfile(ADB_BIN):
         log(f"platform-tools распакованы, но adb не найден: {ADB_BIN}")
         return False
     if sys.platform != "win32":
         os.chmod(ADB_BIN, os.stat(ADB_BIN).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         for f in ("fastboot", "mke2fs"):
-            p = os.path.join(dest, "platform-tools", f)
+            p = os.path.join(target, f)
             if os.path.isfile(p):
                 os.chmod(p, os.stat(p).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     probe = subprocess.run([ADB_BIN, "version"], capture_output=True, text=True)
