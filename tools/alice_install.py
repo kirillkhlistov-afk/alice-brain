@@ -12,9 +12,11 @@ import ipaddress
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +25,12 @@ ADB_PORT = 5555
 SSH_PORTS = (22, 2222, 22222)
 PANEL_PORT = 8080
 DEVICE_DIR = "/data/alice-brain"
+PLATFORM_TOOLS = {
+    "win32": "https://dl.google.com/android/repository/platform-tools-latest-windows.zip",
+    "linux": "https://dl.google.com/android/repository/platform-tools-latest-linux.zip",
+    "darwin": "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip",
+}
+ADB_BIN = "adb"
 
 
 def log(text: str) -> None:
@@ -80,34 +88,78 @@ def find_speaker() -> str | None:
     return None
 
 
+def ensure_adb() -> bool:
+    global ADB_BIN
+    if shutil.which("adb"):
+        ADB_BIN = shutil.which("adb")
+        return True
+    base = os.path.join(os.path.expanduser("~"), ".alice-tools", "adb")
+    for p in (base, base + ".exe"):
+        if os.path.isfile(p):
+            ADB_BIN = p
+            return True
+    url = PLATFORM_TOOLS.get(sys.platform)
+    if not url:
+        log("adb не найден в PATH — поставь platform-tools: https://developer.android.com/tools/releases/platform-tools")
+        return False
+    dest = os.path.join(os.path.expanduser("~"), ".alice-tools")
+    os.makedirs(dest, exist_ok=True)
+    zpath = os.path.join(dest, "platform-tools.zip")
+    log("adb не найден в PATH — скачиваю Android platform-tools (~10 МБ, один раз)...")
+    try:
+        urllib.request.urlretrieve(url, zpath)
+        with zipfile.ZipFile(zpath) as zf:
+            zf.extractall(dest)
+        os.remove(zpath)
+    except Exception as exc:
+        log(f"не смог скачать platform-tools: {exc}")
+        log("поставь вручную: https://developer.android.com/tools/releases/platform-tools")
+        return False
+    ADB_BIN = os.path.join(dest, "platform-tools", "adb" + (".exe" if sys.platform == "win32" else ""))
+    if not os.path.isfile(ADB_BIN):
+        log(f"platform-tools распакованы, но adb не найден: {ADB_BIN}")
+        return False
+    if sys.platform != "win32":
+        os.chmod(ADB_BIN, os.stat(ADB_BIN).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        for f in ("fastboot", "mke2fs"):
+            p = os.path.join(dest, "platform-tools", f)
+            if os.path.isfile(p):
+                os.chmod(p, os.stat(p).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    probe = subprocess.run([ADB_BIN, "version"], capture_output=True, text=True)
+    if probe.returncode != 0:
+        log("adb скачался, но не запускается (на Linux может не хватать libc-i386)")
+        return False
+    log(f"adb готов: {ADB_BIN}")
+    return True
+
+
 def run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     log(" ".join(cmd[:8]) + (" ..." if len(cmd) > 8 else ""))
     return subprocess.run(cmd, **kwargs)
 
 
 def push_via_adb(host: str) -> bool:
-    if shutil.which("adb") is None:
-        log("adb не найден в PATH — установи platform-tools (https://developer.android.com/tools/releases/platform-tools)")
+    if not ensure_adb():
         return False
     if not ping_port(host, ADB_PORT):
         log(f"На {host} нет открытого порта {ADB_PORT} (ADB по сети).")
         log("Root ADB сначала нужно включить на колонке — https://hackalice.me/start/root/")
         return False
-    run(["adb", "connect", f"{host}:{ADB_PORT}"])
-    probe = run(["adb", "-s", f"{host}:{ADB_PORT}", "shell", "echo", "ok"], capture_output=True, text=True)
+    run([ADB_BIN, "connect", f"{host}:{ADB_PORT}"])
+    probe = run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", "echo", "ok"], capture_output=True, text=True)
     if probe.stdout.strip() != "ok":
         log("ADB не отвечает: доступ не root или порт закрыт")
         return False
     log(f"Копирую проект в {DEVICE_DIR} ...")
-    if run(["adb", "-s", f"{host}:{ADB_PORT}", "shell", f"mkdir -p {DEVICE_DIR}"]).returncode != 0:
+    if run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell", f"mkdir -p {DEVICE_DIR}"]).returncode != 0:
         log("mkdir вернул ошибку (нет прав?)")
         return False
     for item in os.listdir(PROJECT_ROOT):
         if item in SKIP_DIRS:
             continue
-        run(["adb", "-s", f"{host}:{ADB_PORT}", "push", os.path.join(PROJECT_ROOT, item), DEVICE_DIR],
+        run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "push", os.path.join(PROJECT_ROOT, item), DEVICE_DIR],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    run(["adb", "-s", f"{host}:{ADB_PORT}", "shell",
+    run([ADB_BIN, "-s", f"{host}:{ADB_PORT}", "shell",
          f"su 0 sh {DEVICE_DIR}/tools/device_setup.sh || sh {DEVICE_DIR}/tools/device_setup.sh"])
     return True
 
@@ -161,7 +213,7 @@ def main() -> int:
         print("\nГотово! Скажи в микрофон: «Алиса» → «включи музыку»")
         return 0
     print("\nПроект установлен, но панель пока не отвечает — смотри журнал на колонке:")
-    print(f"  adb -s {host}:{ADB_PORT} shell cat /data/alice-brain/assistant.log")
+    print(f"  {ADB_BIN} -s {host}:{ADB_PORT} shell cat /data/alice-brain/assistant.log")
     return 1
 
 
