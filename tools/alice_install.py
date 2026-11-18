@@ -409,7 +409,7 @@ def find_hotspot_speaker() -> str | None:
     return adb_hosts[0] if adb_hosts else None
 
 
-def wait_root_hotspot(attempts: int = 30, delay: float = 12) -> str | None:
+def wait_root_hotspot(attempts: int = 40, delay: float = 12) -> str | None:
     import time
     for attempt in range(attempts):
         log(f"ищу колонку с root в сети хотспота ({attempt + 1}/{attempts})...")
@@ -424,6 +424,52 @@ def wait_root_hotspot(attempts: int = 30, delay: float = 12) -> str | None:
                 return host
         time.sleep(delay)
     return None
+
+
+def hotspot_diagnostics() -> None:
+    log("ДИАГНОСТИКА:")
+    joined = []
+    if sys.platform == "win32":
+        arp = subprocess.run(["arp", "-a"], capture_output=True,
+                             text=True, encoding="utf-8", errors="ignore")
+        for line in (arp.stdout or "").splitlines():
+            if "192.168.137." in line and "192.168.137.255" not in line \
+                    and "192.168.137.1 " not in line:
+                joined.append(line.strip())
+    if joined:
+        log("в сети хотспота есть устройства:")
+        for line in joined:
+            print("   " + line)
+    else:
+        log("X КОЛОНКА НЕ ПОДКЛЮЧИЛАСЬ к хотспоту alice-setup (других устройств нет)")
+        log("  значит, сброс/привязка не дошли до Wi-Fi-экрана. Проверь:")
+        log("  1) кольцо пульсировало голубым (режим настройки)?")
+        log("  2) в приложении на экране Wi-Fi была выбрана именно alice-setup?")
+        log("  3) Windows 11: Параметры > Сеть > Мобильный хот-спот > Диапазон = 2,4 ГГц")
+        log("     (Лайт не видит сети 5 ГГц!)")
+        return
+    hits = []
+    logdir = os.path.join(KIT_DIR, "log")
+    if os.path.isdir(logdir):
+        for name in ("yandex.log", "local.log", "dns.log"):
+            try:
+                tail = open(os.path.join(logdir, name), encoding="utf-8",
+                            errors="ignore").read().strip().splitlines()[-3:]
+            except OSError:
+                tail = []
+            for line in tail:
+                hits.append(f"[{name}] {line}")
+    if hits:
+        log("сервер разблокировки ПОЛУЧАЛ запросы (значит, DNS-подмена работает!):")
+        for line in hits:
+            print("   " + line)
+        log("V почти получилось — просто повтори сброс + привязку ещё раз")
+    else:
+        log("X колонка в сети хотспота, но к серверу разблокировки НЕ обращалась")
+        log("  похоже, подмена DNS не применилась к хотспоту. Попробуй:")
+        log("  1) выключи и снова включи «Мобильный хот-спот» в настройках Windows")
+        log("  2) снова запусти установщик и повтори сброс + привязку")
+        log("  3) если снова не выйдет — пришли скрин чёрного окна сервера")
 
 
 def hotspot_cleanup() -> None:
@@ -452,10 +498,7 @@ def hotspot_install() -> int:
     guide_hotspot()
     host = wait_root_hotspot()
     if not host:
-        log("root так и не появился. Проверь:")
-        log("  1) чёрное окно сервера на ноуте ещё открыто?")
-        log("  2) телефон при привязке был с ВЫКЛЮЧЕННЫМ Wi-Fi?")
-        log("  3) сброс колонки: жать ПАУЗУ СРАЗУ после втыкания кабеля, 6-10 сек, до ЖЁЛТО-ЗЕЛЁНОГО")
+        hotspot_diagnostics()
         guide_hotspot()
         return 1
     if not push_via_adb(host):
