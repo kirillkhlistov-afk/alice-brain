@@ -5,6 +5,9 @@
 param([switch]$Cleanup)
 
 $ErrorActionPreference = "Continue"
+$logPath = Join-Path $env:USERPROFILE ".alice-tools\hotspot.log"
+New-Item -ItemType Directory -Force -Path (Split-Path $logPath) | Out-Null
+Start-Transcript -Path $logPath -Force
 Write-Host "== alice-brain: laptop hotspot stand =="
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -79,9 +82,15 @@ try {
     }
     $mgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]::CreateFromConnectionProfile($cp)
     $cfg = $mgr.GetCurrentAccessPointConfiguration()
-    try { $cfg.Ssid = "alice-setup" } catch { Write-Host ("ssid: " + $_.Exception.Message) }
-    try { $cfg.Passphrase = "alice12345" } catch { Write-Host ("pass: " + $_.Exception.Message) }
-    try { $cfg.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::TwoPointFourGigahertz } catch {}
+    try { $cfg.Ssid = "alice-setup"; Write-Host "ssid set: alice-setup" } catch { Write-Host ("ERROR ssid: " + $_.Exception.Message) }
+    try { $cfg.Passphrase = "alice12345"; Write-Host "pass set: alice12345" } catch { Write-Host ("ERROR pass: " + $_.Exception.Message) }
+    try {
+        $cfg.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::TwoPointFourGigahertz
+        Write-Host "band set: 2.4 GHz"
+    } catch {
+        try { Write-Host ("band now: " + $cfg.Band) } catch {}
+        Write-Host "WARN: band not set - if speaker does not see alice-setup, set 2.4 GHz manually"
+    }
     $op = $mgr.ConfigureAccessPointAsync($cfg)
     while ($op.Status -eq 0) { Start-Sleep -Milliseconds 200 }
     if ($mgr.TetheringOperationalState -ne [Windows.Networking.NetworkOperators.TetheringOperationalState]::Operational) {
@@ -89,6 +98,10 @@ try {
         while ($st.Status -eq 0) { Start-Sleep -Milliseconds 200 }
         $res = $st.GetResults()
         Write-Host ("hotspot start status: " + [int]$res.Status + " (0 = ok)")
+        if ([int]$res.Status -ne 0) {
+            Write-Host "ERROR: hotspot did not start - turn on Mobile hotspot manually:"
+            Write-Host "Settings > Network > Mobile hotspot > On, then rerun installer"
+        }
     } else {
         Write-Host "hotspot already running"
     }
@@ -96,6 +109,8 @@ try {
 } catch {
     Write-Host ("ERROR: " + $_.Exception.Message)
     Write-Host "hint: turn on hotspot manually (Settings > Network > Mobile hotspot), then rerun"
+    Stop-Transcript | Out-Null
     exit 1
 }
 Write-Host "ALICE-HOTSPOT-READY"
+Stop-Transcript | Out-Null

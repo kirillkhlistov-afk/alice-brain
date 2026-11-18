@@ -376,6 +376,15 @@ def run_hotspot_ps(cleanup: bool = False) -> None:
         subprocess.Popen(cmd, creationflags=flags)
 
 
+def hotspot_log_tail(n: int = 10) -> list:
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".alice-tools", "hotspot.log"),
+                  encoding="utf-8", errors="ignore") as f:
+            return [l.strip() for l in f.read().splitlines() if l.strip()][-n:]
+    except OSError:
+        return []
+
+
 def wait_hotspot_ready(attempts: int = 90) -> bool:
     import time
     log("поднял точку доступа? Нажми ДА в окне Windows, если попросит права админа!")
@@ -383,7 +392,16 @@ def wait_hotspot_ready(attempts: int = 90) -> bool:
         if hosts_has_marker():
             time.sleep(3)
             return True
+        tail = hotspot_log_tail()
+        errors = [l for l in tail if l.startswith("ERROR")]
+        if errors:
+            for line in errors:
+                log("ноут сказал: " + line)
+            return False
         time.sleep(2)
+    log("хотспот так и не поднялся за 3 минуты. Последнее, что напечатал ноут:")
+    for line in hotspot_log_tail(5):
+        log("   " + line)
     return False
 
 
