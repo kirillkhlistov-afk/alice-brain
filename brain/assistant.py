@@ -1,7 +1,9 @@
 import time
 
 from .config import AssistantConfig
+from .light import build_light
 from .llm import LLM
+from .music import MusicPlayer
 from .skills import Timers, match_skill
 
 OFFLINE_FALLBACKS = (
@@ -17,6 +19,10 @@ class Assistant:
         self.tts = tts
         self._speak = speak
         self.llm = LLM(config.llm)
+        self.player = None if config.music.engine == "none" else MusicPlayer(
+            config.music.engine, config.music.volume
+        )
+        self.lamp = build_light(config)
         self.timers = Timers(self._raw_speak)
         self.last_answer = None
         self._player = None
@@ -33,7 +39,10 @@ class Assistant:
         text = text.strip()
         if not text:
             return ""
-        answer = match_skill(text, self.config, self.timers, self.speak)
+        answer = match_skill(
+            text, self.config, self.timers, self.speak,
+            player=self.player, lamp=self.lamp,
+        )
         if answer is None:
             answer = self.llm.ask(text)
         if answer is None:

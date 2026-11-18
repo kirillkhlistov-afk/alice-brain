@@ -10,6 +10,23 @@ class ServerConfig:
 
 
 @dataclass
+class MusicConfig:
+    engine: str = "auto"
+    volume: int = 80
+    default_station: str = "record-rus"
+
+
+@dataclass
+class LightConfig:
+    type: str = "none"
+    host: str = ""
+    port: int = 55490
+    entity_id: str = "light.my_lamp"
+    ha_url: str = ""
+    ha_token: str = ""
+
+
+@dataclass
 class LLMConfig:
     api_base: str = "https://api.openai.com/v1"
     api_key: str = ""
@@ -36,6 +53,8 @@ class AssistantConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     speech: SpeechConfig = field(default_factory=SpeechConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    music: MusicConfig = field(default_factory=MusicConfig)
+    light: LightConfig = field(default_factory=LightConfig)
     command_timeout: float = 7.0
     silence_threshold: float = 1.2
     city: str = "Москва"
@@ -70,6 +89,12 @@ def from_dict(data: dict) -> AssistantConfig:
     if "server" in data:
         server = {k: v for k, v in data["server"].items() if k in ServerConfig.__dataclass_fields__}
         config.server = ServerConfig(**server)
+    if "music" in data:
+        music = {k: v for k, v in data["music"].items() if k in MusicConfig.__dataclass_fields__}
+        config.music = MusicConfig(**music)
+    if "light" in data:
+        light = {k: v for k, v in data["light"].items() if k in LightConfig.__dataclass_fields__}
+        config.light = LightConfig(**light)
     for key in ("command_timeout", "silence_threshold", "city", "name"):
         if key in data:
             setattr(config, key, data[key])

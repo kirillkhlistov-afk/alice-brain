@@ -13,7 +13,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 echo ">> Обновляю пакеты"
 if command -v apt-get >/dev/null; then
   apt-get update -qq
-  apt-get install -y -qq python3 python3-pip alsa-utils espeak-ng unzip
+  apt-get install -y -qq python3 python3-pip alsa-utils espeak-ng unzip mpv
 fi
 
 echo ">> Копирую код в $TARGET"

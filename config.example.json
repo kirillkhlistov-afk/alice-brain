@@ -13,12 +13,29 @@
     "port": 8080
   },
   "speech": {
-    "wake_words": ["алиса", "начала", "слушай"],
+    "wake_words": [
+      "алиса",
+      "начала",
+      "слушай"
+    ],
     "vosk_model_path": "/opt/alice-brain/models/vosk-model-small-ru-0.22",
     "tts_engine": "espeak",
     "tts_voice": "ru",
     "sample_rate": 16000,
     "input_device": "default",
     "output_device": "default"
+  },
+  "music": {
+    "engine": "auto",
+    "volume": 80,
+    "default_station": "record-rus"
+  },
+  "light": {
+    "type": "yeelight",
+    "host": "",
+    "port": 55490,
+    "entity_id": "light.my_lamp",
+    "ha_url": "",
+    "ha_token": ""
   }
 }

@@ -50,6 +50,32 @@ PAGE = """<!DOCTYPE html>
       <input type="range" id="vol" min="0" max="100" onchange="setVolume(this.value)">
     </div>
   </div>
+  <div class="cards">
+    <div class="card" style="text-align:left">
+      <span>💡 Лампа</span>
+      <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+        <button style="padding:6px 10px;font-size:.85rem" onclick="light('on')">Вкл</button>
+        <button style="padding:6px 10px;font-size:.85rem;background:#3a3f52" onclick="light('off')">Выкл</button>
+        <button style="padding:6px 10px;font-size:.85rem;background:#e74c3c" onclick="light('color','255,0,0')"></button>
+        <button style="padding:6px 10px;font-size:.85rem;background:#2ecc71" onclick="light('color','0,255,0')"></button>
+        <button style="padding:6px 10px;font-size:.85rem;background:#3498db" onclick="light('color','0,0,255')"></button>
+        <button style="padding:6px 10px;font-size:.85rem;background:#f1c40f" onclick="light('color','255,220,0')"></button>
+        <button style="padding:6px 10px;font-size:.85rem;background:#ff9ff3" onclick="light('color','255,105,180')"></button>
+      </div>
+    </div>
+  </div>
+  <div class="cards">
+    <div class="card" style="text-align:left">
+      <span>🎹 Музыка (бесплатное радио)</span>
+      <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+        <button style="padding:6px 10px;font-size:.85rem;background:#3a3f52" onclick="music('stop')">■ Стоп</button>
+        <button style="padding:6px 10px;font-size:.85rem" onclick="music('play','record-rus')">Рус хит</button>
+        <button style="padding:6px 10px;font-size:.85rem" onclick="music('play','groovesalad')">Chill</button>
+        <button style="padding:6px 10px;font-size:.85rem" onclick="music('play','record-trap')">Trap</button>
+        <button style="padding:6px 10px;font-size:.85rem" onclick="music('play','dronezone')">Космос</button>
+      </div>
+    </div>
+  </div>
 <script>
 const chat = document.getElementById('chat');
 function add(cls, text){ const d=document.createElement('div'); d.className='msg '+cls; d.textContent=text; chat.appendChild(d); chat.scrollTop=chat.scrollHeight; }
@@ -73,6 +99,14 @@ async function send(){
 async function setVolume(v){
   document.getElementById('vol_label').textContent = v + '%';
   await fetch('/api/volume', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({level:+v})});
+}
+async function light(action, rgb){
+  const body = {action};
+  if(rgb) body.rgb = rgb.split(',').map(Number);
+  await fetch('/api/light', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+}
+async function music(action, station){
+  await fetch('/api/music', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, station})});
 }
 document.getElementById('txt').addEventListener('keydown', e => { if(e.key==='Enter') send(); });
 refresh(); setInterval(refresh, 10000);
@@ -135,6 +169,26 @@ class ControlServer:
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
+                elif self.path == "/manifest.json":
+                    self._json({
+                        "name": assistant.config.name or "Alice Brain",
+                        "short_name": "Алиса",
+                        "start_url": "/",
+                        "display": "standalone",
+                        "background_color": "#12141a",
+                        "theme_color": "#12141a",
+                        "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
+                    })
+                elif self.path == "/icon.svg":
+                    icon = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+                            '<circle cx="32" cy="32" r="30" fill="#7c6cff"/>'
+                            '<circle cx="32" cy="32" r="18" fill="#12141a"/>'
+                            '<circle cx="32" cy="32" r="8" fill="#7c6cff"/></svg>').encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/svg+xml")
+                    self.send_header("Content-Length", str(len(icon)))
+                    self.end_headers()
+                    self.wfile.write(icon)
                 elif self.path == "/api/status":
                     self._json({
                         "name": assistant.config.name,
@@ -145,6 +199,11 @@ class ControlServer:
                     })
                 elif self.path == "/api/timers":
                     self._json({"count": assistant.timers.count()})
+                elif self.path == "/api/stations":
+                    from .music import STATIONS
+                    self._json({"stations": [
+                        {"id": k, "title": v["title"]} for k, v in STATIONS.items()
+                    ]})
                 else:
                     self._json({"error": "not found"}, 404)
 
@@ -162,6 +221,49 @@ class ControlServer:
                     data = self._body()
                     ok, message = outer.set_volume(data.get("level"))
                     self._json({"ok": ok, "message": message}, 200 if ok else 400)
+                elif self.path == "/api/light":
+                    if assistant.lamp is None:
+                        self._json({"error": "лампа не настроена"}, 400)
+                        return
+                    data = self._body()
+                    action = data.get("action")
+                    if action == "on":
+                        self._json({"answer": assistant.lamp.set_power(True)})
+                    elif action == "off":
+                        self._json({"answer": assistant.lamp.set_power(False)})
+                    elif action == "color":
+                        r, g, b = data.get("rgb", (255, 255, 255))
+                        assistant.lamp.set_power(True)
+                        self._json({"answer": assistant.lamp.set_rgb(r, g, b)})
+                    elif action == "brightness":
+                        assistant.lamp.set_power(True)
+                        self._json({"answer": assistant.lamp.set_brightness(data.get("value", 100))})
+                    elif action == "text_color":
+                        from .light import COLORS
+                        text = str(data.get("text", ""))
+                        for word, rgb in COLORS.items():
+                            if word in text:
+                                assistant.lamp.set_power(True)
+                                self._json({"answer": assistant.lamp.set_rgb(*rgb)})
+                                return
+                        self._json({"error": "неизвестный цвет"}, 400)
+                    else:
+                        self._json({"error": "unknown action"}, 400)
+                elif self.path == "/api/music":
+                    if assistant.player is None:
+                        self._json({"error": "плеер не настроен"}, 400)
+                        return
+                    data = self._body()
+                    if data.get("action") == "stop":
+                        assistant.player.stop()
+                        self._json({"answer": "Музыка выключена"})
+                    else:
+                        from .music import STATIONS
+                        station = data.get("station") or assistant.config.music.default_station
+                        if station not in STATIONS:
+                            self._json({"error": "нет такой станции"}, 400)
+                            return
+                        self._json({"answer": assistant.player.play(station)})
                 else:
                     self._json({"error": "not found"}, 404)
 

@@ -6,6 +6,8 @@ import urllib.parse
 import urllib.request
 
 from .config import AssistantConfig
+from .light import COLORS
+from .music import STATIONS, MusicPlayer
 from .textutils import humanize_duration, normalize, parse_duration
 
 JOKES = (
@@ -47,7 +49,30 @@ class Timers:
         return len(self.timers)
 
 
-def match_skill(text: str, config: AssistantConfig, timers: Timers, speak) -> str | None:
+def parse_light_command(text: str) -> dict:
+    for word, rgb in COLORS.items():
+        stems = {word, word[:-1], word[:-2] if len(word) > 4 else word}
+        if any(stem and stem in text for stem in stems):
+            return {"action": "color", "rgb": rgb}
+    if "выключ" in text:
+        return {"action": "off"}
+    if re.search(r"яркост|ярче|тускл|темнее", text):
+        from .textutils import words_to_number
+        value = None
+        for token in text.split():
+            if token.isdigit():
+                value = int(token)
+            else:
+                num = words_to_number([token])
+                if num and num <= 100 and value is None:
+                    value = num
+        if value:
+            return {"action": "brightness", "value": value}
+        return {"action": "brightness", "value": 100 if "ярче" in text else 30}
+    return {"action": "on"}
+
+
+def match_skill(text: str, config: AssistantConfig, timers: Timers, speak, player=None, lamp=None) -> str | None:
     text = normalize(text)
 
     if "таймер" in text:
@@ -83,6 +108,36 @@ def match_skill(text: str, config: AssistantConfig, timers: Timers, speak) -> st
 
     if re.search(r"повтори\s.*сказал", text):
         return "Повторяю: " + re.sub(r"^.*сказал\w*\s*", "", text)
+
+    if re.search(r"музык|радио|песн|трек|станци", text):
+        if player is None:
+            return "Плеер не найден: поставь mpv или укажи движок в конфиге"
+        if "выключ" in text or "стоп" in text or "хватит" in text:
+            player.stop()
+            return "Музыка выключена"
+        station = MusicPlayer.find_station(text)
+        if "включ" not in text and "запусти" not in text and "послуш" not in text and "играй" not in text:
+            station = station if "станц" in text or "радио" in text else None
+        if station:
+            return player.play(station)
+        if "выключ" not in text:
+            return player.play(getattr(config.music, "default_station", "record-rus"))
+        return "Музыка уже выключена"
+
+    if re.search(r"свет|ламп|подсвет|ночник|освещен|подсветк", text):
+        if lamp is None:
+            return "Лампа не подключена: пропиши её в конфиге (секция light)"
+        action = parse_light_command(text)
+        if action["action"] == "off":
+            return lamp.set_power(False)
+        if action["action"] == "color":
+            r, g, b = action["rgb"]
+            lamp.set_power(True)
+            return lamp.set_rgb(r, g, b)
+        if action["action"] == "brightness":
+            lamp.set_power(True)
+            return lamp.set_brightness(action["value"])
+        return lamp.set_power(True)
 
     return None
 
